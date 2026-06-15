@@ -167,6 +167,21 @@ def norm(s):
     return s.replace(" ", "").lower()
 
 
+def norm_loose(s):
+    """공백·영문·숫자·기호 제거 후 한글만 비교 (예: '죽전에스S치과의원' → '죽전에스치과의원')."""
+    import re
+    return re.sub(r"[^가-힣]", "", s)
+
+
+def matches(target, name):
+    """치과명 매칭 — 영문 약자(S 등)·의원 접미사 차이를 흡수."""
+    t, n = norm(target), norm(name)
+    if t and (t in n or n in t):
+        return True
+    tl, nl = norm_loose(target), norm_loose(name)
+    return bool(tl) and (tl in nl or nl in tl)
+
+
 def main():
     ap = argparse.ArgumentParser(description="출발지 기준 가까운 치과 순위 + 특정 치과 등수")
     ap.add_argument("--start", required=True, help="출발지 주소/장소명 또는 'lat,lng'")
@@ -212,7 +227,6 @@ def main():
     print(f"{'순위':>3} {'치과명':<22} {'자동차거리/시간' if args.mode=='driving' else '직선거리':<16} 주소")
     print("-" * 90)
     target_rank = None
-    tnorm = norm(args.target)
     for i, c in enumerate(cands, 1):
         if args.mode == "driving" and c.get("drive_m") is not None:
             dist = f"{c['drive_m']/1000:.1f}km / {round(c['drive_s']/60)}분"
@@ -221,7 +235,7 @@ def main():
         else:
             dist = f"{c['straight_m']/1000:.1f}km"
         mark = ""
-        if tnorm and (tnorm in norm(c["name"]) or norm(c["name"]) in tnorm):
+        if matches(args.target, c["name"]):
             mark = "  ⬅ 여기!"
             if target_rank is None:
                 target_rank = i
