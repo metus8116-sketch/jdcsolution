@@ -29,6 +29,7 @@ import urllib.request
 
 KAKAO_LOCAL = "https://dapi.kakao.com/v2/local"
 KAKAO_NAVI = "https://apis-navi.kakaomobility.com/v1/directions"
+OSRM = "https://router.project-osrm.org/route/v1/driving"
 
 
 def _get(url, key, params=None):
@@ -125,20 +126,39 @@ def search_dentists(lng, lat, key, keyword="치과", radius=8000, max_count=45):
     return results[:max_count]
 
 
-def driving_distance(o_lng, o_lat, d_lng, d_lat, key):
-    """카카오모빌리티 길찾기로 자동차 거리(m)·시간(s) 반환. 실패 시 None."""
-    params = {
-        "origin": f"{o_lng},{o_lat}",
-        "destination": f"{d_lng},{d_lat}",
-        "priority": "RECOMMEND",
-    }
-    try:
-        data = _get(KAKAO_NAVI, key, params)
-        routes = data.get("routes", [])
-        if not routes or routes[0].get("result_code") != 0:
+def driving_distance(o_lng, o_lat, d_lng, d_lat, key, engine="osrm"):
+    """자동차 도로 거리(m)·시간(s) 반환. 실패 시 None.
+
+    engine="osrm"  : 무료·키 불필요·승인 불필요 (OpenStreetMap 기반, 실시간 교통 미반영)
+    engine="kakao" : 카카오내비 길찾기 (실시간 교통 반영, [카카오내비] 활성화 필요)
+    """
+    if engine == "kakao":
+        params = {
+            "origin": f"{o_lng},{o_lat}",
+            "destination": f"{d_lng},{d_lat}",
+            "priority": "RECOMMEND",
+        }
+        try:
+            data = _get(KAKAO_NAVI, key, params)
+            routes = data.get("routes", [])
+            if not routes or routes[0].get("result_code") != 0:
+                return None
+            s = routes[0]["summary"]
+            return int(s["distance"]), int(s["duration"])
+        except SystemExit:
             return None
-        s = routes[0]["summary"]
-        return int(s["distance"]), int(s["duration"])
+        except Exception:
+            return None
+    # OSRM (기본)
+    url = f"{OSRM}/{o_lng},{o_lat};{d_lng},{d_lat}?overview=false"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "dentist-rank/1.0"})
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        routes = data.get("routes", [])
+        if not routes:
+            return None
+        return int(routes[0]["distance"]), int(routes[0]["duration"])
     except Exception:
         return None
 
@@ -155,6 +175,8 @@ def main():
     ap.add_argument("--radius", type=int, default=8000, help="검색 반경 m (기본 8000, 최대 20000)")
     ap.add_argument("--mode", choices=["driving", "straight"], default="driving",
                     help="driving=자동차 실제 거리(기본), straight=직선거리")
+    ap.add_argument("--engine", choices=["osrm", "kakao"], default="osrm",
+                    help="driving 거리 계산 엔진: osrm=무료·승인불필요(기본), kakao=카카오내비(승인필요)")
     ap.add_argument("--key", default=os.environ.get("KAKAO_REST_API_KEY"), help="카카오 REST 키")
     args = ap.parse_args()
 
@@ -170,9 +192,10 @@ def main():
     print(f"🦷 반경 {args.radius}m 내 치과 {len(cands)}곳 수집 완료\n")
 
     if args.mode == "driving":
-        print("🚗 자동차 거리 계산 중...", file=sys.stderr)
+        eng = "카카오내비" if args.engine == "kakao" else "OSRM(무료)"
+        print(f"🚗 자동차 거리 계산 중... (엔진: {eng})", file=sys.stderr)
         for c in cands:
-            res = driving_distance(lng, lat, c["lng"], c["lat"], args.key)
+            res = driving_distance(lng, lat, c["lng"], c["lat"], args.key, args.engine)
             if res:
                 c["drive_m"], c["drive_s"] = res
             else:
