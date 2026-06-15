@@ -23,6 +23,7 @@ import json
 import os
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -35,8 +36,22 @@ def _get(url, key, params=None):
     if params:
         url = url + "?" + urllib.parse.urlencode(params)
     req = urllib.request.Request(url, headers={"Authorization": f"KakaoAK {key}"})
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", "replace")
+        msg = [f"[카카오 API 오류] HTTP {e.code}", f"응답: {body}"]
+        if e.code in (401, 403):
+            msg += [
+                "",
+                "▶ 확인하세요 (카카오 developers 콘솔):",
+                "  1) 쓰신 키가 'REST API 키'가 맞나요? (JavaScript/Admin 키 아님)",
+                "  2) [앱 설정 > 플랫폼]에 Web 플랫폼이 1개 등록돼 있나요? (예: http://localhost)",
+                "  3) [카카오맵] 사용 설정이 ON 인가요? (로컬/검색 API)",
+                "  4) driving 모드라면 [카카오내비] 사용 설정도 ON 이어야 합니다.",
+            ]
+        raise SystemExit("\n".join(msg))
 
 
 def resolve_start(start, key):
