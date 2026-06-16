@@ -410,12 +410,22 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   #warn{position:absolute;right:12px;top:12px;z-index:5;background:#fff3cd;color:#664d03;
     padding:6px 10px;border-radius:6px;font-size:11px;max-width:240px}
   #panel{position:absolute;right:12px;top:56px;bottom:24px;width:250px;z-index:5;background:#fff;
-    border-radius:10px;box-shadow:0 2px 10px rgba(0,0,0,.25);font-size:12px;overflow-y:auto;padding:10px 12px}
+    border-radius:10px;box-shadow:0 2px 10px rgba(0,0,0,.25);font-size:12px;overflow-y:auto;padding:0 12px 10px}
+  #panel-head{position:sticky;top:0;background:#fff;display:flex;align-items:center;justify-content:space-between;
+    padding:10px 0 6px;border-bottom:1px solid #eee;margin-bottom:6px}
+  #panel-head b{font-size:14px}
+  #panel-toggle{font-size:12px;border:1px solid #ccc;background:#f5f5f5;border-radius:6px;padding:3px 8px;cursor:pointer}
   #panel b{font-size:14px}
   #panel .grp{margin-top:8px}
   #panel .gh{font-weight:bold;padding:3px 6px;border-radius:4px;color:#fff;display:inline-block;margin-bottom:3px}
   #panel .it{padding:1px 0 1px 8px;color:#333}
   #panel.hidden{display:none}
+  #panel.collapsed{bottom:auto;height:auto;max-height:none;overflow:visible}
+  #panel.collapsed #panel-body{display:none}
+  @media (max-width:600px){
+    #panel{left:8px;right:8px;width:auto;top:auto;bottom:8px;max-height:55vh;font-size:13px}
+    #title,#warn{font-size:12px;max-width:60%}
+  }
 </style>
 </head>
 <body>
@@ -423,7 +433,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <div id="title"><b>🚗 __TITLE__</b><br/>차로 도달 시간대(분) 지도</div>
 <div id="warn">OSRM 추정치(교통량 미반영). 광고 타깃 참고용.</div>
 <div id="legend"><b>차로 도달 시간</b><div id="legend-rows"></div></div>
-<div id="panel" class="hidden"><b>🏢 단지 목록</b><div id="panel-body"></div></div>
+<div id="panel" class="hidden"><div id="panel-head"><b>🏢 단지 목록</b><button id="panel-toggle">필터 숨기기</button></div><div id="panel-body"></div></div>
 <script>
 const JS_KEY = "__JSKEY__";
 const ISO = __DATA__;
@@ -494,6 +504,15 @@ function initMap(){
 
     const panel = document.getElementById('panel'); panel.classList.remove('hidden');
     const body = document.getElementById('panel-body');
+
+    // 접기/펼치기 토글 (모바일은 기본 접힘)
+    const toggleBtn = document.getElementById('panel-toggle');
+    function setCollapsed(c){
+      panel.classList.toggle('collapsed', c);
+      toggleBtn.textContent = c ? '필터 보기' : '필터 숨기기';
+    }
+    toggleBtn.addEventListener('click', function(){ setCollapsed(!panel.classList.contains('collapsed')); });
+    if (window.innerWidth < 600) setCollapsed(true);
 
     function makeFilter(title, cntObj, activeObj){
       const box = document.createElement('div');
