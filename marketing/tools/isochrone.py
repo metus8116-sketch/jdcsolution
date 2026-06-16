@@ -227,6 +227,8 @@ def main():
     ap.add_argument("--clinic", default=None, help="치과 좌표 '위도,경도' (미지정 시 카카오 검색)")
     ap.add_argument("--name", default="죽전에스치과", help="치과 검색어 (기본: 죽전에스치과)")
     ap.add_argument("--half", type=float, default=9.0, help="격자 반경 km (기본 9)")
+    ap.add_argument("--time-factor", type=float, default=1.0,
+                    help="OSRM 시간 보정 배수(신호·정체 반영). 실제 내비÷OSRM 비율. 예: 1.8")
     ap.add_argument("--spacing", type=float, default=0.5, help="격자 간격 km (작을수록 정밀·느림, 기본 0.5)")
     ap.add_argument("--js-key", default=os.environ.get("KAKAO_JS_KEY", ""), help="카카오 JavaScript 키 (지도 표시용)")
     ap.add_argument("--key", default=os.environ.get("KAKAO_REST_API_KEY"), help="카카오 REST 키")
@@ -249,11 +251,12 @@ def main():
     secs = osrm_durations(lng, lat, cells)
 
     # 도달 셀 분류
+    tf = args.time_factor
     reachable = []  # (lat, lng, minutes, band_index)
     for (clat, clng), s in zip(cells, secs):
         if s is None:
             continue
-        m = s / 60.0
+        m = s / 60.0 * tf
         if m > MAX_MIN:
             continue
         bi = next(i for i, b in enumerate(BANDS) if m <= b[0])
@@ -303,7 +306,7 @@ def main():
             for (name, plat, plng, ptype, addr), s in zip(raw, psecs):
                 if s is None:
                     continue
-                m = s / 60.0
+                m = s / 60.0 * tf
                 if m > MAX_MIN:
                     continue
                 bi = next(i for i, b in enumerate(BANDS) if m <= b[0])
