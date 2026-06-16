@@ -192,6 +192,36 @@ def region_of(addr):
     return "기타"
 
 
+def normalize_region(r3):
+    """행정동 이름 정리. 오포1동/오포2동 → 오포읍 (구 오포읍 통합 표기)."""
+    if not r3:
+        return ""
+    if r3.startswith("오포") and r3.endswith("동"):
+        return "오포읍"
+    return r3
+
+
+def poi_region(key, lng, lat, cache):
+    """좌표→행정동(읍/면/동) 라벨. 약 100m 격자 캐시."""
+    rk = (round(lat, 3), round(lng, 3))
+    if rk in cache:
+        return cache[rk]
+    name = ""
+    try:
+        data = kakao_get(f"{KAKAO_LOCAL}/geo/coord2regioncode.json", key, {"x": lng, "y": lat})
+        docs = data.get("documents", [])
+        doc = next((d for d in docs if d.get("region_type") == "H"), None) or (docs[0] if docs else None)
+        if doc:
+            name = normalize_region(doc.get("region_3depth_name", ""))
+    except SystemExit:
+        name = ""
+    except Exception:
+        name = ""
+    cache[rk] = name
+    time.sleep(0.02)
+    return name
+
+
 def main():
     ap = argparse.ArgumentParser(description="죽전에스치과 차로 N분 등시간 지도 생성")
     ap.add_argument("--clinic", default=None, help="치과 좌표 '위도,경도' (미지정 시 카카오 검색)")
@@ -268,6 +298,8 @@ def main():
         if raw:
             print(f"🚗 시설 {len(raw)}곳 드라이브타임 계산 중...", file=sys.stderr)
             psecs = osrm_durations(lng, lat, [(r[1], r[2]) for r in raw])
+            print("🏷  행정동(읍/면) 라벨 추출 중...", file=sys.stderr)
+            rcache = {}
             for (name, plat, plng, ptype, addr), s in zip(raw, psecs):
                 if s is None:
                     continue
@@ -275,7 +307,8 @@ def main():
                 if m > MAX_MIN:
                     continue
                 bi = next(i for i, b in enumerate(BANDS) if m <= b[0])
-                pois.append((name, plat, plng, round(m, 1), bi, ptype, region_of(addr)))
+                region = poi_region(args.key, plng, plat, rcache) or region_of(addr)
+                pois.append((name, plat, plng, round(m, 1), bi, ptype, region))
         # 시간대별 출력
         title = "·".join(poi_keywords) + (f" @ {','.join(area_tokens)}" if area_tokens else "")
         print("\n" + "=" * 70)
