@@ -9,7 +9,7 @@
 #   - GitHub Pages 켜두기 (Settings > Pages > Branch: claude/dental-offline-marketing-ags60d, 폴더: /docs)
 
 param(
-  [string]$poi  = "아파트,마을회관",
+  [string]$poi  = "아파트,오피스텔,빌라,타운하우스,연립주택,마을회관,경로당",
   [string]$area = "오포,모현",
   [double]$half = 10
 )
