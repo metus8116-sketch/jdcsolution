@@ -1,0 +1,61 @@
+name: 지도 다시 만들기 (build map)
+
+# 모바일에서도 GitHub Actions 탭 → "Run workflow"로 지도를 갱신할 수 있습니다.
+# 사전 준비(1회): 저장소 Settings > Secrets and variables > Actions 에
+#   KAKAO_REST_API_KEY, KAKAO_JS_KEY 두 개를 등록하세요.
+
+on:
+  workflow_dispatch:
+    inputs:
+      area:
+        description: "지역 필터(비우면 전체). 예: 오포,모현"
+        default: ""
+      poi:
+        description: "시설 종류(비우면 기본 7종). 예: 마을회관,경로당"
+        default: ""
+      half:
+        description: "반경 km"
+        default: "10"
+      engine:
+        description: "시간 엔진 (osrm=무료추정 / kakao=실측)"
+        default: "osrm"
+      tf:
+        description: "OSRM 보정 배수(비우면 1.0). 예: 1.8"
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Generate iso_map.html
+        env:
+          KAKAO_REST_API_KEY: ${{ secrets.KAKAO_REST_API_KEY }}
+          KAKAO_JS_KEY: ${{ secrets.KAKAO_JS_KEY }}
+          IN_AREA: ${{ github.event.inputs.area }}
+          IN_POI: ${{ github.event.inputs.poi }}
+          IN_HALF: ${{ github.event.inputs.half }}
+          IN_ENGINE: ${{ github.event.inputs.engine }}
+          IN_TF: ${{ github.event.inputs.tf }}
+        run: |
+          set -e
+          mkdir -p docs
+          ARGS=(--out docs/iso_map.html --half "${IN_HALF:-10}" --js-key "$KAKAO_JS_KEY")
+          [ -n "$IN_AREA" ]   && ARGS+=(--area "$IN_AREA")
+          [ -n "$IN_POI" ]    && ARGS+=(--poi "$IN_POI")
+          [ -n "$IN_ENGINE" ] && ARGS+=(--engine "$IN_ENGINE")
+          [ -n "$IN_TF" ]     && ARGS+=(--time-factor "$IN_TF")
+          python marketing/tools/isochrone.py "${ARGS[@]}"
+      - name: Commit & push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/iso_map.html
+          git commit -m "Rebuild iso_map via Actions" || echo "no changes"
+          git push
