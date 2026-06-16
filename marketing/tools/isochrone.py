@@ -174,6 +174,24 @@ def gather_pois(key, reachable, keywords, search_radius_m=800):
     return list(found.values())
 
 
+def region_of(addr):
+    """주소에서 구/읍/면 단위 추출. 읍·면을 구보다 우선(더 구체적).
+    예: '용인시 처인구 모현읍 오산리'→'모현읍', '용인시 수지구 죽전동'→'수지구'."""
+    if not addr:
+        return "기타"
+    toks = addr.split()
+    for tok in toks:                      # 1순위: 읍/면 (가장 구체적)
+        if tok and tok[-1] in ("읍", "면"):
+            return tok
+    for tok in toks:                      # 2순위: 구
+        if tok and tok[-1] == "구":
+            return tok
+    for tok in toks:                      # 3순위: 시/군
+        if tok and tok[-1] in ("시", "군"):
+            return tok
+    return "기타"
+
+
 def main():
     ap = argparse.ArgumentParser(description="죽전에스치과 차로 N분 등시간 지도 생성")
     ap.add_argument("--clinic", default=None, help="치과 좌표 '위도,경도' (미지정 시 카카오 검색)")
@@ -250,14 +268,14 @@ def main():
         if raw:
             print(f"🚗 시설 {len(raw)}곳 드라이브타임 계산 중...", file=sys.stderr)
             psecs = osrm_durations(lng, lat, [(r[1], r[2]) for r in raw])
-            for (name, plat, plng, ptype, _addr), s in zip(raw, psecs):
+            for (name, plat, plng, ptype, addr), s in zip(raw, psecs):
                 if s is None:
                     continue
                 m = s / 60.0
                 if m > MAX_MIN:
                     continue
                 bi = next(i for i, b in enumerate(BANDS) if m <= b[0])
-                pois.append((name, plat, plng, round(m, 1), bi, ptype))
+                pois.append((name, plat, plng, round(m, 1), bi, ptype, region_of(addr)))
         # 시간대별 출력
         title = "·".join(poi_keywords) + (f" @ {','.join(area_tokens)}" if area_tokens else "")
         print("\n" + "=" * 70)
@@ -266,8 +284,8 @@ def main():
         for bi, (cap, lbl, _c) in enumerate(BANDS):
             group = sorted([p for p in pois if p[4] == bi], key=lambda p: p[3])
             print(f"\n● 차로 {lbl}  ({len(group)}곳)")
-            for name, _plat, _plng, m, _bi, ptype in group:
-                print(f"    - [{ptype}] {name}  ({m:.0f}분)")
+            for name, _plat, _plng, m, _bi, ptype, region in group:
+                print(f"    - [{ptype}|{region}] {name}  ({m:.0f}분)")
         # 합계 요약
         bcount = {i: sum(1 for p in pois if p[4] == i) for i in range(len(BANDS))}
         tcount = {}
@@ -356,10 +374,10 @@ function initMap(){
     rows.appendChild(div);
   });
 
-  // 시설 점 + 종류 필터 + 패널 목록
+  // 시설 점 + (종류·지역) 필터 + 패널 목록
   const infoPoi = new kakao.maps.InfoWindow({zIndex: 10});
   if (ISO.pois && ISO.pois.length){
-    const circlesByType = {};
+    const allCircles = [];  // {circle, poi}
     ISO.pois.forEach(function(p){
       const circle = new kakao.maps.Circle({
         center: new kakao.maps.LatLng(p.lat, p.lng),
@@ -368,43 +386,54 @@ function initMap(){
       });
       circle.setMap(map);
       kakao.maps.event.addListener(circle, 'mouseover', function(){
-        infoPoi.setContent('<div style="padding:4px 8px;font-size:12px">'+p.name+' · '+(p.t||'')+' · '+p.min+'분</div>');
+        infoPoi.setContent('<div style="padding:4px 8px;font-size:12px">'+p.name+' · '+(p.t||'')+' · '+(p.r||'')+' · '+p.min+'분</div>');
         infoPoi.setPosition(new kakao.maps.LatLng(p.lat, p.lng));
         infoPoi.setMap(map);
       });
       kakao.maps.event.addListener(circle, 'mouseout', function(){ infoPoi.setMap(null); });
-      (circlesByType[p.t] = circlesByType[p.t] || []).push(circle);
+      allCircles.push({circle: circle, poi: p});
     });
 
-    const types = Object.keys(circlesByType);
-    const active = {}; types.forEach(function(t){ active[t] = true; });
+    // 종류·지역 목록과 개수
+    function counts(field){ const o={}; ISO.pois.forEach(function(p){o[p[field]]=(o[p[field]]||0)+1;}); return o; }
+    const typeCnt = counts('t'), regionCnt = counts('r');
+    const activeType = {}, activeRegion = {};
+    Object.keys(typeCnt).forEach(function(t){ activeType[t]=true; });
+    Object.keys(regionCnt).forEach(function(r){ activeRegion[r]=true; });
+
+    function isVisible(p){ return activeType[p.t] && activeRegion[p.r]; }
+    function applyFilters(){
+      allCircles.forEach(function(o){ o.circle.setMap(isVisible(o.poi) ? map : null); });
+      renderGroups();
+    }
 
     const panel = document.getElementById('panel'); panel.classList.remove('hidden');
     const body = document.getElementById('panel-body');
 
-    // 종류 필터 체크박스
-    const filter = document.createElement('div');
-    filter.style.cssText = 'margin-bottom:8px;padding:6px 8px;background:#eef2f5;border-radius:6px;font-size:12px';
-    filter.innerHTML = '<b>종류 필터</b><br/>';
-    types.forEach(function(t){
-      const lab = document.createElement('label');
-      lab.style.cssText = 'display:inline-block;margin:3px 8px 0 0;white-space:nowrap;cursor:pointer';
-      lab.innerHTML = '<input type="checkbox" checked> '+t+'('+circlesByType[t].length+')';
-      filter.appendChild(lab);
-      lab.querySelector('input').addEventListener('change', function(e){
-        active[t] = e.target.checked;
-        circlesByType[t].forEach(function(c){ c.setMap(e.target.checked ? map : null); });
-        renderGroups();
+    function makeFilter(title, cntObj, activeObj){
+      const box = document.createElement('div');
+      box.style.cssText = 'margin-bottom:8px;padding:6px 8px;background:#eef2f5;border-radius:6px;font-size:12px';
+      box.innerHTML = '<b>'+title+'</b><br/>';
+      Object.keys(cntObj).sort().forEach(function(k){
+        const lab = document.createElement('label');
+        lab.style.cssText = 'display:inline-block;margin:3px 8px 0 0;white-space:nowrap;cursor:pointer';
+        lab.innerHTML = '<input type="checkbox" checked> '+k+'('+cntObj[k]+')';
+        box.appendChild(lab);
+        lab.querySelector('input').addEventListener('change', function(e){
+          activeObj[k] = e.target.checked; applyFilters();
+        });
       });
-    });
-    body.appendChild(filter);
+      return box;
+    }
+    body.appendChild(makeFilter('종류 필터', typeCnt, activeType));
+    body.appendChild(makeFilter('지역 필터 (구/읍/면)', regionCnt, activeRegion));
 
     const groups = document.createElement('div');
     body.appendChild(groups);
 
     function renderGroups(){
       groups.innerHTML = '';
-      const visible = ISO.pois.filter(function(p){ return active[p.t]; });
+      const visible = ISO.pois.filter(isVisible);
       const sum = document.createElement('div');
       sum.style.cssText = 'margin:2px 0 8px;padding:6px 8px;background:#f4f6f8;border-radius:6px;font-size:12px';
       const tc = {}; visible.forEach(function(p){ tc[p.t] = (tc[p.t]||0)+1; });
@@ -418,7 +447,7 @@ function initMap(){
         wrap.innerHTML = '<span class="gh" style="background:'+b.color+'">'+b.label+' ('+grp.length+')</span>';
         grp.forEach(function(p){
           const it = document.createElement('div'); it.className='it';
-          it.textContent = '• '+p.name+' ['+(p.t||'')+'] ('+p.min+'분)';
+          it.textContent = '• '+p.name+' ['+(p.t||'')+'/'+(p.r||'')+'] ('+p.min+'분)';
           wrap.appendChild(it);
         });
         groups.appendChild(wrap);
@@ -444,7 +473,7 @@ def write_html(path, js_key, label, lat, lng, reachable, half_lat, half_lng, poi
         "half": {"lat": half_lat, "lng": half_lng},
         "cells": [{"lat": r[0], "lng": r[1], "b": r[3]} for r in reachable],
         "pois": [{"name": p[0], "lat": p[1], "lng": p[2], "min": p[3], "b": p[4],
-                  "t": (p[5] if len(p) > 5 else "")}
+                  "t": (p[5] if len(p) > 5 else ""), "r": (p[6] if len(p) > 6 else "기타")}
                  for p in (pois or [])],
     }
     bands = [{"label": b[1], "color": b[2]} for b in BANDS]
