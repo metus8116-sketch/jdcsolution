@@ -281,8 +281,8 @@ def main():
     ap.add_argument("--no-regions", action="store_true", help="행정구역 목록 추출 생략(더 빠름)")
     ap.add_argument("--poi", default="아파트,오피스텔,빌라,타운하우스,연립주택,마을회관,경로당",
                     help="시간대별로 세분할 시설 키워드(쉼표로 여러 개). 빈 문자열이면 시설 표시 안 함")
-    ap.add_argument("--area", default="오포,모현",
-                    help="주소에 이 단어가 포함된 곳만 표시(쉼표로 여러 개). 빈 문자열이면 전체")
+    ap.add_argument("--area", default="",
+                    help="주소에 이 단어가 포함된 곳만 표시(쉼표로 여러 개). 비우면 전체(지도 필터로 선택). 예: 오포,모현")
     args = ap.parse_args()
 
     if not args.key:
