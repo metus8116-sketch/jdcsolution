@@ -356,9 +356,10 @@ function initMap(){
     rows.appendChild(div);
   });
 
-  // 시설(아파트 등) 점 + 패널 목록
+  // 시설 점 + 종류 필터 + 패널 목록
   const infoPoi = new kakao.maps.InfoWindow({zIndex: 10});
   if (ISO.pois && ISO.pois.length){
+    const circlesByType = {};
     ISO.pois.forEach(function(p){
       const circle = new kakao.maps.Circle({
         center: new kakao.maps.LatLng(p.lat, p.lng),
@@ -372,28 +373,58 @@ function initMap(){
         infoPoi.setMap(map);
       });
       kakao.maps.event.addListener(circle, 'mouseout', function(){ infoPoi.setMap(null); });
+      (circlesByType[p.t] = circlesByType[p.t] || []).push(circle);
     });
+
+    const types = Object.keys(circlesByType);
+    const active = {}; types.forEach(function(t){ active[t] = true; });
+
     const panel = document.getElementById('panel'); panel.classList.remove('hidden');
     const body = document.getElementById('panel-body');
-    // 합계 요약
-    const sum = document.createElement('div');
-    sum.style.cssText = 'margin:4px 0 8px;padding:6px 8px;background:#f4f6f8;border-radius:6px;font-size:12px';
-    const tc = {}; ISO.pois.forEach(function(p){ tc[p.t] = (tc[p.t]||0)+1; });
-    const tline = Object.keys(tc).map(function(k){ return k+' '+tc[k]; }).join(' / ');
-    sum.innerHTML = '총 <b>'+ISO.pois.length+'</b>곳' + (tline ? ' &nbsp;<span style="color:#555">('+tline+')</span>' : '');
-    body.appendChild(sum);
-    BANDS.forEach(function(b, bi){
-      const grp = ISO.pois.filter(function(p){return p.b===bi;})
-                          .sort(function(a,c){return a.min-c.min;});
-      const wrap = document.createElement('div'); wrap.className='grp';
-      wrap.innerHTML = '<span class="gh" style="background:'+b.color+'">'+b.label+' ('+grp.length+')</span>';
-      grp.forEach(function(p){
-        const it = document.createElement('div'); it.className='it';
-        it.textContent = '• '+p.name+' ['+(p.t||'')+'] ('+p.min+'분)';
-        wrap.appendChild(it);
+
+    // 종류 필터 체크박스
+    const filter = document.createElement('div');
+    filter.style.cssText = 'margin-bottom:8px;padding:6px 8px;background:#eef2f5;border-radius:6px;font-size:12px';
+    filter.innerHTML = '<b>종류 필터</b><br/>';
+    types.forEach(function(t){
+      const lab = document.createElement('label');
+      lab.style.cssText = 'display:inline-block;margin:3px 8px 0 0;white-space:nowrap;cursor:pointer';
+      lab.innerHTML = '<input type="checkbox" checked> '+t+'('+circlesByType[t].length+')';
+      filter.appendChild(lab);
+      lab.querySelector('input').addEventListener('change', function(e){
+        active[t] = e.target.checked;
+        circlesByType[t].forEach(function(c){ c.setMap(e.target.checked ? map : null); });
+        renderGroups();
       });
-      body.appendChild(wrap);
     });
+    body.appendChild(filter);
+
+    const groups = document.createElement('div');
+    body.appendChild(groups);
+
+    function renderGroups(){
+      groups.innerHTML = '';
+      const visible = ISO.pois.filter(function(p){ return active[p.t]; });
+      const sum = document.createElement('div');
+      sum.style.cssText = 'margin:2px 0 8px;padding:6px 8px;background:#f4f6f8;border-radius:6px;font-size:12px';
+      const tc = {}; visible.forEach(function(p){ tc[p.t] = (tc[p.t]||0)+1; });
+      const tline = Object.keys(tc).map(function(k){ return k+' '+tc[k]; }).join(' / ');
+      sum.innerHTML = '총 <b>'+visible.length+'</b>곳' + (tline ? ' &nbsp;<span style="color:#555">('+tline+')</span>' : '');
+      groups.appendChild(sum);
+      BANDS.forEach(function(b, bi){
+        const grp = visible.filter(function(p){ return p.b===bi; }).sort(function(a,c){ return a.min-c.min; });
+        if (!grp.length) return;
+        const wrap = document.createElement('div'); wrap.className='grp';
+        wrap.innerHTML = '<span class="gh" style="background:'+b.color+'">'+b.label+' ('+grp.length+')</span>';
+        grp.forEach(function(p){
+          const it = document.createElement('div'); it.className='it';
+          it.textContent = '• '+p.name+' ['+(p.t||'')+'] ('+p.min+'분)';
+          wrap.appendChild(it);
+        });
+        groups.appendChild(wrap);
+      });
+    }
+    renderGroups();
   }
 }
 
