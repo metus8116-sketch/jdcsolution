@@ -268,6 +268,15 @@ def main():
             print(f"\n● 차로 {lbl}  ({len(group)}곳)")
             for name, _plat, _plng, m, _bi, ptype in group:
                 print(f"    - [{ptype}] {name}  ({m:.0f}분)")
+        # 합계 요약
+        bcount = {i: sum(1 for p in pois if p[4] == i) for i in range(len(BANDS))}
+        tcount = {}
+        for p in pois:
+            tcount[p[5]] = tcount.get(p[5], 0) + 1
+        print("\n" + "-" * 70)
+        print(f"📊 합계: 총 {len(pois)}곳")
+        print("   시간대별: " + " / ".join(f"{BANDS[i][1]} {bcount[i]}곳" for i in range(len(BANDS))))
+        print("   종류별:   " + " / ".join(f"{t} {c}곳" for t, c in tcount.items()))
 
     # HTML 생성
     write_html(args.out, args.js_key, label, lat, lng, reachable, half_lat, half_lng, pois)
@@ -366,6 +375,13 @@ function initMap(){
     });
     const panel = document.getElementById('panel'); panel.classList.remove('hidden');
     const body = document.getElementById('panel-body');
+    // 합계 요약
+    const sum = document.createElement('div');
+    sum.style.cssText = 'margin:4px 0 8px;padding:6px 8px;background:#f4f6f8;border-radius:6px;font-size:12px';
+    const tc = {}; ISO.pois.forEach(function(p){ tc[p.t] = (tc[p.t]||0)+1; });
+    const tline = Object.keys(tc).map(function(k){ return k+' '+tc[k]; }).join(' / ');
+    sum.innerHTML = '총 <b>'+ISO.pois.length+'</b>곳' + (tline ? ' &nbsp;<span style="color:#555">('+tline+')</span>' : '');
+    body.appendChild(sum);
     BANDS.forEach(function(b, bi){
       const grp = ISO.pois.filter(function(p){return p.b===bi;})
                           .sort(function(a,c){return a.min-c.min;});
