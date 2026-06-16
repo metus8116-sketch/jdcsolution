@@ -140,38 +140,37 @@ def region_name(key, lng, lat, cache):
     return name
 
 
-def gather_pois(key, reachable, keyword, search_radius_m=700):
-    """도달 영역 안에서 keyword(예: 아파트) 시설을 수집 → [(name, lat, lng)] (중복 제거)."""
-    anchors = {}
-    for clat, clng, _m, _bi in reachable:
-        ak = (round(clat, 3), round(clng, 3))  # 약 100m 격자로 앵커 축약
-        anchors[ak] = (clat, clng)
-    # 너무 촘촘하면 호출이 많으므로 약 0.8km 격자로 한 번 더 축약
+def gather_pois(key, reachable, keywords, search_radius_m=800):
+    """도달 영역 안에서 keywords(예: 아파트, 빌라, 마을회관) 시설 수집.
+    반환: [(name, lat, lng, ptype, addr)] (중복 제거)."""
     coarse = {}
-    for (clat, clng) in anchors.values():
-        ck = (round(clat, 2), round(clng, 2))
+    for clat, clng, _m, _bi in reachable:
+        ck = (round(clat, 2), round(clng, 2))  # 약 1.1km 격자로 검색 지점 축약
         coarse.setdefault(ck, (clat, clng))
-    print(f"🏢 '{keyword}' 수집 중... (검색 지점 {len(coarse)}곳)", file=sys.stderr)
+    print(f"🏢 시설 수집: {keywords}  (검색 지점 {len(coarse)}곳 × {len(keywords)}종)", file=sys.stderr)
     found = {}
-    for (clat, clng) in coarse.values():
-        for page in (1, 2):
-            params = {"query": keyword, "x": clng, "y": clat,
-                      "radius": search_radius_m, "sort": "distance", "size": 15, "page": page}
-            try:
-                data = kakao_get(f"{KAKAO_LOCAL}/search/keyword.json", key, params)
-            except SystemExit:
-                break
-            docs = data.get("documents", [])
-            for d in docs:
-                if "아파트" not in d.get("category_name", "") and keyword not in d.get("category_name", ""):
-                    # 키워드가 '아파트'가 아니면 카테고리 필터를 느슨하게
-                    if keyword == "아파트":
+    for kw in keywords:
+        for (clat, clng) in coarse.values():
+            for page in (1, 2):
+                params = {"query": kw, "x": clng, "y": clat,
+                          "radius": search_radius_m, "sort": "distance", "size": 15, "page": page}
+                try:
+                    data = kakao_get(f"{KAKAO_LOCAL}/search/keyword.json", key, params)
+                except SystemExit:
+                    break
+                for d in data.get("documents", []):
+                    nm = d.get("place_name", "")
+                    cat = d.get("category_name", "")
+                    if kw not in nm and kw not in cat:
                         continue
-                found[d["id"]] = (d.get("place_name", ""), float(d["y"]), float(d["x"]))
-            if data.get("meta", {}).get("is_end", True):
-                break
-            time.sleep(0.05)
-        time.sleep(0.05)
+                    pid = d["id"]
+                    if pid in found:
+                        continue
+                    addr = d.get("road_address_name") or d.get("address_name", "")
+                    found[pid] = (nm, float(d["y"]), float(d["x"]), kw, addr)
+                if data.get("meta", {}).get("is_end", True):
+                    break
+                time.sleep(0.04)
     return list(found.values())
 
 
@@ -186,7 +185,9 @@ def main():
     ap.add_argument("--out", default="iso_map.html", help="출력 HTML 파일명")
     ap.add_argument("--no-regions", action="store_true", help="행정구역 목록 추출 생략(더 빠름)")
     ap.add_argument("--poi", default=None,
-                    help="시간대별로 세분할 시설 키워드 (예: 아파트). 지정 시 단지 단위로 쪼개서 표시")
+                    help="시간대별로 세분할 시설 키워드(쉼표로 여러 개). 예: 아파트  /  빌라,타운하우스,마을회관")
+    ap.add_argument("--area", default=None,
+                    help="주소에 이 단어가 포함된 곳만 표시(쉼표로 여러 개). 예: 오포,모현")
     args = ap.parse_args()
 
     if not args.key:
@@ -237,30 +238,36 @@ def main():
         else:
             print("    (행정구역 추출 생략 또는 없음)")
 
-    # 시설(아파트 등) 세분화
-    pois = []  # (name, lat, lng, band_index)
-    if args.poi and reachable:
-        raw = gather_pois(args.key, reachable, args.poi)
+    # 시설(아파트/빌라/타운하우스/마을회관 등) 세분화
+    pois = []  # (name, lat, lng, minutes, band_index, ptype)
+    poi_keywords = [k.strip() for k in args.poi.split(",") if k.strip()] if args.poi else []
+    area_tokens = [a.strip() for a in args.area.split(",") if a.strip()] if args.area else []
+    if poi_keywords and reachable:
+        raw = gather_pois(args.key, reachable, poi_keywords)
+        if area_tokens:
+            raw = [r for r in raw if any(a in (r[4] or "") for a in area_tokens)]
+            print(f"   지역필터 [{','.join(area_tokens)}] 적용 → {len(raw)}곳", file=sys.stderr)
         if raw:
-            print(f"🚗 '{args.poi}' {len(raw)}곳 드라이브타임 계산 중...", file=sys.stderr)
-            psecs = osrm_durations(lng, lat, [(p[1], p[2]) for p in raw])
-            for (name, plat, plng), s in zip(raw, psecs):
+            print(f"🚗 시설 {len(raw)}곳 드라이브타임 계산 중...", file=sys.stderr)
+            psecs = osrm_durations(lng, lat, [(r[1], r[2]) for r in raw])
+            for (name, plat, plng, ptype, _addr), s in zip(raw, psecs):
                 if s is None:
                     continue
                 m = s / 60.0
                 if m > MAX_MIN:
                     continue
                 bi = next(i for i, b in enumerate(BANDS) if m <= b[0])
-                pois.append((name, plat, plng, round(m, 1), bi))
+                pois.append((name, plat, plng, round(m, 1), bi, ptype))
         # 시간대별 출력
+        title = "·".join(poi_keywords) + (f" @ {','.join(area_tokens)}" if area_tokens else "")
         print("\n" + "=" * 70)
-        print(f"🏢 '{args.poi}' 단위 세분화 (시간대별)")
+        print(f"🏢 '{title}' 시설 세분화 (시간대별)")
         print("=" * 70)
         for bi, (cap, lbl, _c) in enumerate(BANDS):
             group = sorted([p for p in pois if p[4] == bi], key=lambda p: p[3])
             print(f"\n● 차로 {lbl}  ({len(group)}곳)")
-            for name, _plat, _plng, m, _bi in group:
-                print(f"    - {name}  ({m:.0f}분)")
+            for name, _plat, _plng, m, _bi, ptype in group:
+                print(f"    - [{ptype}] {name}  ({m:.0f}분)")
 
     # HTML 생성
     write_html(args.out, args.js_key, label, lat, lng, reachable, half_lat, half_lng, pois)
@@ -351,7 +358,7 @@ function initMap(){
       });
       circle.setMap(map);
       kakao.maps.event.addListener(circle, 'mouseover', function(){
-        infoPoi.setContent('<div style="padding:4px 8px;font-size:12px">'+p.name+' · '+p.min+'분</div>');
+        infoPoi.setContent('<div style="padding:4px 8px;font-size:12px">'+p.name+' · '+(p.t||'')+' · '+p.min+'분</div>');
         infoPoi.setPosition(new kakao.maps.LatLng(p.lat, p.lng));
         infoPoi.setMap(map);
       });
@@ -366,7 +373,7 @@ function initMap(){
       wrap.innerHTML = '<span class="gh" style="background:'+b.color+'">'+b.label+' ('+grp.length+')</span>';
       grp.forEach(function(p){
         const it = document.createElement('div'); it.className='it';
-        it.textContent = '• '+p.name+' ('+p.min+'분)';
+        it.textContent = '• '+p.name+' ['+(p.t||'')+'] ('+p.min+'분)';
         wrap.appendChild(it);
       });
       body.appendChild(wrap);
@@ -389,7 +396,8 @@ def write_html(path, js_key, label, lat, lng, reachable, half_lat, half_lng, poi
         "clinic": {"lat": lat, "lng": lng, "name": label},
         "half": {"lat": half_lat, "lng": half_lng},
         "cells": [{"lat": r[0], "lng": r[1], "b": r[3]} for r in reachable],
-        "pois": [{"name": p[0], "lat": p[1], "lng": p[2], "min": p[3], "b": p[4]}
+        "pois": [{"name": p[0], "lat": p[1], "lng": p[2], "min": p[3], "b": p[4],
+                  "t": (p[5] if len(p) > 5 else "")}
                  for p in (pois or [])],
     }
     bands = [{"label": b[1], "color": b[2]} for b in BANDS]
