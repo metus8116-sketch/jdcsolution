@@ -38,6 +38,7 @@ import urllib.request
 
 KAKAO_LOCAL = "https://dapi.kakao.com/v2/local"
 OSRM_TABLE = "https://router.project-osrm.org/table/v1/driving"
+KAKAO_NAVI_MULTI = "https://apis-navi.kakaomobility.com/v1/destinations/directions"
 
 # 시간 띠 정의 (분 상한, 라벨, 색상)
 BANDS = [
@@ -114,6 +115,48 @@ def osrm_durations(src_lng, src_lat, dests, chunk=90):
             print(f"  [경고] OSRM 배치 실패({k}): {e}", file=sys.stderr)
             out.extend([None] * len(batch))
         time.sleep(0.4)  # 공용 서버 예의
+    return out
+
+
+def kakao_post(url, key, body):
+    data = json.dumps(body).encode("utf-8")
+    req = urllib.request.Request(url, data=data, method="POST", headers={
+        "Authorization": f"KakaoAK {key}", "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", "replace")
+        raise SystemExit(
+            f"[카카오내비 API 오류] HTTP {e.code}\n응답: {body}\n"
+            "→ 카카오 콘솔에서 [카카오내비] 활성화 ON / 권한 신청이 됐는지 확인하세요.\n"
+            "  (활성화 전이면 --engine osrm 로 무료 추정치를 쓰세요.)")
+
+
+def kakao_durations(src_lng, src_lat, dests, key, chunk=30):
+    """카카오내비 '여러 목적지 길찾기'로 출발지→각 목적지 실제 소요시간(초). 실패분 None.
+    한 번에 최대 30곳, 탐색반경 10km 제한(초과 목적지는 None)."""
+    out = [None] * len(dests)
+    for k in range(0, len(dests), chunk):
+        batch = dests[k:k + chunk]
+        body = {
+            "origin": {"x": src_lng, "y": src_lat},
+            "destinations": [{"x": lng, "y": lat, "key": str(k + i)}
+                             for i, (lat, lng) in enumerate(batch)],
+            "radius": 10000,
+        }
+        data = kakao_post(KAKAO_NAVI_MULTI, key, body)
+        for r in data.get("routes", []):
+            try:
+                idx = int(r.get("key"))
+            except (TypeError, ValueError):
+                continue
+            rc = r.get("result_code")
+            if rc == 0:
+                out[idx] = r.get("summary", {}).get("duration")
+            elif rc == 104:  # 출발지-도착지가 너무 가까움 → 0분 처리
+                out[idx] = 0
+        time.sleep(0.1)
     return out
 
 
@@ -229,6 +272,8 @@ def main():
     ap.add_argument("--half", type=float, default=9.0, help="격자 반경 km (기본 9)")
     ap.add_argument("--time-factor", type=float, default=1.0,
                     help="OSRM 시간 보정 배수(신호·정체 반영). 실제 내비÷OSRM 비율. 예: 1.8")
+    ap.add_argument("--engine", choices=["osrm", "kakao"], default="osrm",
+                    help="시간 계산 엔진: osrm=무료추정(기본) / kakao=카카오내비 실측(활성화 필요)")
     ap.add_argument("--spacing", type=float, default=0.5, help="격자 간격 km (작을수록 정밀·느림, 기본 0.5)")
     ap.add_argument("--js-key", default=os.environ.get("KAKAO_JS_KEY", ""), help="카카오 JavaScript 키 (지도 표시용)")
     ap.add_argument("--key", default=os.environ.get("KAKAO_REST_API_KEY"), help="카카오 REST 키")
@@ -246,9 +291,11 @@ def main():
     lng, lat, label = resolve_clinic(args.clinic, args.key, args.name)
     print(f"🏥 치과: {label}  (lat={lat}, lng={lng})")
 
+    eng_name = "카카오내비(실측)" if args.engine == "kakao" else "OSRM(무료추정)"
     cells, half_lat, half_lng = build_grid(lat, lng, args.half, args.spacing)
-    print(f"🧭 격자 {len(cells)}칸 (반경 {args.half}km, 간격 {args.spacing}km) — OSRM 드라이브타임 계산 중...")
-    secs = osrm_durations(lng, lat, cells)
+    print(f"🧭 격자 {len(cells)}칸 (반경 {args.half}km, 간격 {args.spacing}km) — {eng_name} 드라이브타임 계산 중...")
+    secs = (kakao_durations(lng, lat, cells, args.key)
+            if args.engine == "kakao" else osrm_durations(lng, lat, cells))
 
     # 도달 셀 분류
     tf = args.time_factor
@@ -299,8 +346,10 @@ def main():
             raw = [r for r in raw if any(a in (r[4] or "") for a in area_tokens)]
             print(f"   지역필터 [{','.join(area_tokens)}] 적용 → {len(raw)}곳", file=sys.stderr)
         if raw:
-            print(f"🚗 시설 {len(raw)}곳 드라이브타임 계산 중...", file=sys.stderr)
-            psecs = osrm_durations(lng, lat, [(r[1], r[2]) for r in raw])
+            print(f"🚗 시설 {len(raw)}곳 드라이브타임 계산 중... ({eng_name})", file=sys.stderr)
+            dlist = [(r[1], r[2]) for r in raw]
+            psecs = (kakao_durations(lng, lat, dlist, args.key)
+                     if args.engine == "kakao" else osrm_durations(lng, lat, dlist))
             print("🏷  행정동(읍/면) 라벨 추출 중...", file=sys.stderr)
             rcache = {}
             for (name, plat, plng, ptype, addr), s in zip(raw, psecs):

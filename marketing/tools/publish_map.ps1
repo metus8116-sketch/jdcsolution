@@ -16,7 +16,8 @@ param(
   [string]$poi  = "",
   [string]$area = "",
   [double]$half = 10,
-  [double]$tf   = 0    # OSRM time calibration factor (e.g. 1.8). 0 = use default 1.0
+  [double]$tf   = 0,      # OSRM time calibration factor (e.g. 1.8). 0 = use default 1.0
+  [string]$engine = ""    # "kakao" for real Kakao Navi times (needs activation), else OSRM
 )
 
 $tools = $PSScriptRoot
@@ -30,7 +31,8 @@ Set-Location $tools
 $pyArgs = @("isochrone.py", "--half", $half, "--out", $out)
 if ($poi)      { $pyArgs += @("--poi",  $poi) }
 if ($area)     { $pyArgs += @("--area", $area) }
-if ($tf -gt 0) { $pyArgs += @("--time-factor", $tf) }
+if ($tf -gt 0)  { $pyArgs += @("--time-factor", $tf) }
+if ($engine)    { $pyArgs += @("--engine", $engine) }
 python @pyArgs
 
 if (!(Test-Path $out)) {
