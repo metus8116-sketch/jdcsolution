@@ -140,6 +140,41 @@ def region_name(key, lng, lat, cache):
     return name
 
 
+def gather_pois(key, reachable, keyword, search_radius_m=700):
+    """도달 영역 안에서 keyword(예: 아파트) 시설을 수집 → [(name, lat, lng)] (중복 제거)."""
+    anchors = {}
+    for clat, clng, _m, _bi in reachable:
+        ak = (round(clat, 3), round(clng, 3))  # 약 100m 격자로 앵커 축약
+        anchors[ak] = (clat, clng)
+    # 너무 촘촘하면 호출이 많으므로 약 0.8km 격자로 한 번 더 축약
+    coarse = {}
+    for (clat, clng) in anchors.values():
+        ck = (round(clat, 2), round(clng, 2))
+        coarse.setdefault(ck, (clat, clng))
+    print(f"🏢 '{keyword}' 수집 중... (검색 지점 {len(coarse)}곳)", file=sys.stderr)
+    found = {}
+    for (clat, clng) in coarse.values():
+        for page in (1, 2):
+            params = {"query": keyword, "x": clng, "y": clat,
+                      "radius": search_radius_m, "sort": "distance", "size": 15, "page": page}
+            try:
+                data = kakao_get(f"{KAKAO_LOCAL}/search/keyword.json", key, params)
+            except SystemExit:
+                break
+            docs = data.get("documents", [])
+            for d in docs:
+                if "아파트" not in d.get("category_name", "") and keyword not in d.get("category_name", ""):
+                    # 키워드가 '아파트'가 아니면 카테고리 필터를 느슨하게
+                    if keyword == "아파트":
+                        continue
+                found[d["id"]] = (d.get("place_name", ""), float(d["y"]), float(d["x"]))
+            if data.get("meta", {}).get("is_end", True):
+                break
+            time.sleep(0.05)
+        time.sleep(0.05)
+    return list(found.values())
+
+
 def main():
     ap = argparse.ArgumentParser(description="죽전에스치과 차로 N분 등시간 지도 생성")
     ap.add_argument("--clinic", default=None, help="치과 좌표 '위도,경도' (미지정 시 카카오 검색)")
@@ -150,6 +185,8 @@ def main():
     ap.add_argument("--key", default=os.environ.get("KAKAO_REST_API_KEY"), help="카카오 REST 키")
     ap.add_argument("--out", default="iso_map.html", help="출력 HTML 파일명")
     ap.add_argument("--no-regions", action="store_true", help="행정구역 목록 추출 생략(더 빠름)")
+    ap.add_argument("--poi", default=None,
+                    help="시간대별로 세분할 시설 키워드 (예: 아파트). 지정 시 단지 단위로 쪼개서 표시")
     args = ap.parse_args()
 
     if not args.key:
@@ -200,8 +237,33 @@ def main():
         else:
             print("    (행정구역 추출 생략 또는 없음)")
 
+    # 시설(아파트 등) 세분화
+    pois = []  # (name, lat, lng, band_index)
+    if args.poi and reachable:
+        raw = gather_pois(args.key, reachable, args.poi)
+        if raw:
+            print(f"🚗 '{args.poi}' {len(raw)}곳 드라이브타임 계산 중...", file=sys.stderr)
+            psecs = osrm_durations(lng, lat, [(p[1], p[2]) for p in raw])
+            for (name, plat, plng), s in zip(raw, psecs):
+                if s is None:
+                    continue
+                m = s / 60.0
+                if m > MAX_MIN:
+                    continue
+                bi = next(i for i, b in enumerate(BANDS) if m <= b[0])
+                pois.append((name, plat, plng, round(m, 1), bi))
+        # 시간대별 출력
+        print("\n" + "=" * 70)
+        print(f"🏢 '{args.poi}' 단위 세분화 (시간대별)")
+        print("=" * 70)
+        for bi, (cap, lbl, _c) in enumerate(BANDS):
+            group = sorted([p for p in pois if p[4] == bi], key=lambda p: p[3])
+            print(f"\n● 차로 {lbl}  ({len(group)}곳)")
+            for name, _plat, _plng, m, _bi in group:
+                print(f"    - {name}  ({m:.0f}분)")
+
     # HTML 생성
-    write_html(args.out, args.js_key, label, lat, lng, reachable, half_lat, half_lng)
+    write_html(args.out, args.js_key, label, lat, lng, reachable, half_lat, half_lng, pois)
     print("\n" + "=" * 70)
     print(f"🗺  지도 파일 생성: {args.out}")
     if not args.js_key:
@@ -228,6 +290,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     padding:8px 12px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.2);font-size:14px}
   #warn{position:absolute;right:12px;top:12px;z-index:5;background:#fff3cd;color:#664d03;
     padding:6px 10px;border-radius:6px;font-size:11px;max-width:240px}
+  #panel{position:absolute;right:12px;top:56px;bottom:24px;width:250px;z-index:5;background:#fff;
+    border-radius:10px;box-shadow:0 2px 10px rgba(0,0,0,.25);font-size:12px;overflow-y:auto;padding:10px 12px}
+  #panel b{font-size:14px}
+  #panel .grp{margin-top:8px}
+  #panel .gh{font-weight:bold;padding:3px 6px;border-radius:4px;color:#fff;display:inline-block;margin-bottom:3px}
+  #panel .it{padding:1px 0 1px 8px;color:#333}
+  #panel.hidden{display:none}
 </style>
 </head>
 <body>
@@ -235,6 +304,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <div id="title"><b>🚗 __TITLE__</b><br/>차로 도달 시간대(분) 지도</div>
 <div id="warn">OSRM 추정치(교통량 미반영). 광고 타깃 참고용.</div>
 <div id="legend"><b>차로 도달 시간</b><div id="legend-rows"></div></div>
+<div id="panel" class="hidden"><b>🏢 단지 목록</b><div id="panel-body"></div></div>
 <script>
 const JS_KEY = "__JSKEY__";
 const ISO = __DATA__;
@@ -269,6 +339,39 @@ function initMap(){
     div.innerHTML = '<span class="sw" style="background:'+b.color+'"></span>'+b.label;
     rows.appendChild(div);
   });
+
+  // 시설(아파트 등) 점 + 패널 목록
+  const infoPoi = new kakao.maps.InfoWindow({zIndex: 10});
+  if (ISO.pois && ISO.pois.length){
+    ISO.pois.forEach(function(p){
+      const circle = new kakao.maps.Circle({
+        center: new kakao.maps.LatLng(p.lat, p.lng),
+        radius: 35, strokeWeight: 1, strokeColor: '#333', strokeOpacity: 0.8,
+        fillColor: BANDS[p.b].color, fillOpacity: 0.95
+      });
+      circle.setMap(map);
+      kakao.maps.event.addListener(circle, 'mouseover', function(){
+        infoPoi.setContent('<div style="padding:4px 8px;font-size:12px">'+p.name+' · '+p.min+'분</div>');
+        infoPoi.setPosition(new kakao.maps.LatLng(p.lat, p.lng));
+        infoPoi.setMap(map);
+      });
+      kakao.maps.event.addListener(circle, 'mouseout', function(){ infoPoi.setMap(null); });
+    });
+    const panel = document.getElementById('panel'); panel.classList.remove('hidden');
+    const body = document.getElementById('panel-body');
+    BANDS.forEach(function(b, bi){
+      const grp = ISO.pois.filter(function(p){return p.b===bi;})
+                          .sort(function(a,c){return a.min-c.min;});
+      const wrap = document.createElement('div'); wrap.className='grp';
+      wrap.innerHTML = '<span class="gh" style="background:'+b.color+'">'+b.label+' ('+grp.length+')</span>';
+      grp.forEach(function(p){
+        const it = document.createElement('div'); it.className='it';
+        it.textContent = '• '+p.name+' ('+p.min+'분)';
+        wrap.appendChild(it);
+      });
+      body.appendChild(wrap);
+    });
+  }
 }
 
 const s = document.createElement('script');
@@ -281,11 +384,13 @@ document.head.appendChild(s);
 """
 
 
-def write_html(path, js_key, label, lat, lng, reachable, half_lat, half_lng):
+def write_html(path, js_key, label, lat, lng, reachable, half_lat, half_lng, pois=None):
     data = {
         "clinic": {"lat": lat, "lng": lng, "name": label},
         "half": {"lat": half_lat, "lng": half_lng},
         "cells": [{"lat": r[0], "lng": r[1], "b": r[3]} for r in reachable],
+        "pois": [{"name": p[0], "lat": p[1], "lng": p[2], "min": p[3], "b": p[4]}
+                 for p in (pois or [])],
     }
     bands = [{"label": b[1], "color": b[2]} for b in BANDS]
     html = (HTML_TEMPLATE
