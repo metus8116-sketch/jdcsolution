@@ -1,16 +1,20 @@
-# 지도 생성 + GitHub Pages 게시 (원클릭)
+# Generate iso_map.html and publish to GitHub Pages (one click)
 #
-# 사용법 (marketing\tools 폴더에서):
+# Usage (run inside marketing\tools):
 #   .\publish_map.ps1
-#   .\publish_map.ps1 -poi "아파트,마을회관,경로당" -area "오포,모현" -half 11
+#   .\publish_map.ps1 -half 11
+#   .\publish_map.ps1 -poi "villa,office" -area "opo"   # override (ASCII or Korean from CLI both OK)
 #
-# 사전 준비:
-#   - 키 설정(1회): setx KAKAO_REST_API_KEY "...";  setx KAKAO_JS_KEY "..."
-#   - GitHub Pages 켜두기 (Settings > Pages > Branch: claude/dental-offline-marketing-ags60d, 폴더: /docs)
+# Korean default keywords live in isochrone.py (Python handles UTF-8 safely).
+# This script is intentionally ASCII-only so Windows PowerShell 5.1 never mis-reads it.
+#
+# Prereqs:
+#   - Keys once: setx KAKAO_REST_API_KEY "..."; setx KAKAO_JS_KEY "..."
+#   - GitHub Pages on (Settings > Pages > Branch: claude/dental-offline-marketing-ags60d, folder: /docs)
 
 param(
-  [string]$poi  = "아파트,오피스텔,빌라,타운하우스,연립주택,마을회관,경로당",
-  [string]$area = "오포,모현",
+  [string]$poi  = "",
+  [string]$area = "",
   [double]$half = 10
 )
 
@@ -18,23 +22,27 @@ $tools = $PSScriptRoot
 $root  = (Resolve-Path (Join-Path $tools "..\..")).Path
 $docs  = Join-Path $root "docs"
 if (!(Test-Path $docs)) { New-Item -ItemType Directory -Path $docs | Out-Null }
+$out = Join-Path $docs "iso_map.html"
 
-Write-Host "[1/3] 지도 생성 중..." -ForegroundColor Cyan
+Write-Host "[1/3] generating map..." -ForegroundColor Cyan
 Set-Location $tools
-python isochrone.py --poi $poi --area $area --half $half --out (Join-Path $docs "iso_map.html")
-if (!(Test-Path (Join-Path $docs "iso_map.html"))) {
-  Write-Host "지도 생성 실패. 키(KAKAO_REST_API_KEY/KAKAO_JS_KEY) 설정을 확인하세요." -ForegroundColor Red
+$pyArgs = @("isochrone.py", "--half", $half, "--out", $out)
+if ($poi)  { $pyArgs += @("--poi",  $poi) }
+if ($area) { $pyArgs += @("--area", $area) }
+python @pyArgs
+
+if (!(Test-Path $out)) {
+  Write-Host "FAILED: map not created. Check KAKAO_REST_API_KEY / KAKAO_JS_KEY." -ForegroundColor Red
   exit 1
 }
 
-Write-Host "[2/3] GitHub에 게시(push) 중..." -ForegroundColor Cyan
+Write-Host "[2/3] pushing to GitHub..." -ForegroundColor Cyan
 Set-Location $root
 git add docs/iso_map.html
 git commit -m "Update published iso_map" 2>$null
 git push origin claude/dental-offline-marketing-ags60d
 
 Write-Host ""
-Write-Host "[3/3] 완료! 1~2분 뒤 아래 주소에서 보입니다:" -ForegroundColor Green
+Write-Host "[3/3] Done! Live in ~1-2 min at:" -ForegroundColor Green
 Write-Host "  https://metus8116-sketch.github.io/jdcsolution/iso_map.html" -ForegroundColor Yellow
-Write-Host ""
-Write-Host "※ 처음 1회: 카카오 콘솔 Web 플랫폼에 https://metus8116-sketch.github.io 등록 필요" -ForegroundColor DarkGray
+Write-Host "  (first time: register https://metus8116-sketch.github.io in Kakao Web platform)" -ForegroundColor DarkGray
