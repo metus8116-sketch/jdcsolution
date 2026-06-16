@@ -44,7 +44,7 @@ Write-Host "[2/3] pushing to GitHub..." -ForegroundColor Cyan
 Set-Location $root
 git add docs/iso_map.html
 git commit -m "Update published iso_map" 2>$null
-git push origin claude/dental-offline-marketing-ags60d
+git push origin HEAD
 
 Write-Host ""
 Write-Host "[3/3] Done! Live in ~1-2 min at:" -ForegroundColor Green
