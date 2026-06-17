@@ -382,7 +382,7 @@ def main():
         print("   종류별:   " + " / ".join(f"{t} {c}곳" for t, c in tcount.items()))
 
     # HTML 생성
-    write_html(args.out, args.js_key, label, lat, lng, reachable, half_lat, half_lng, pois)
+    write_html(args.out, args.js_key, label, lat, lng, reachable, half_lat, half_lng, pois, args.engine)
     print("\n" + "=" * 70)
     print(f"🗺  지도 파일 생성: {args.out}")
     if not args.js_key:
@@ -431,7 +431,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <body>
 <div id="map"></div>
 <div id="title"><b>🚗 __TITLE__</b><br/>차로 도달 시간대(분) 지도</div>
-<div id="warn">OSRM 추정치(교통량 미반영). 광고 타깃 참고용.</div>
+<div id="warn">__WARN__</div>
 <div id="legend"><b>차로 도달 시간</b><div id="legend-rows"></div></div>
 <div id="panel" class="hidden"><div id="panel-head"><b>🏢 단지 목록</b><button id="panel-toggle">필터 숨기기</button></div><div id="panel-body"></div></div>
 <script>
@@ -571,7 +571,7 @@ document.head.appendChild(s);
 """
 
 
-def write_html(path, js_key, label, lat, lng, reachable, half_lat, half_lng, pois=None):
+def write_html(path, js_key, label, lat, lng, reachable, half_lat, half_lng, pois=None, engine="osrm"):
     data = {
         "clinic": {"lat": lat, "lng": lng, "name": label},
         "half": {"lat": half_lat, "lng": half_lng},
@@ -580,9 +580,12 @@ def write_html(path, js_key, label, lat, lng, reachable, half_lat, half_lng, poi
                   "t": (p[5] if len(p) > 5 else ""), "r": (p[6] if len(p) > 6 else "기타")}
                  for p in (pois or [])],
     }
+    warn = ("✅ 카카오내비 실측(실시간 교통 반영)" if engine == "kakao"
+            else "OSRM 추정치(교통량 미반영). 광고 타깃 참고용.")
     bands = [{"label": b[1], "color": b[2]} for b in BANDS]
     html = (HTML_TEMPLATE
             .replace("__TITLE__", label)
+            .replace("__WARN__", warn)
             .replace("__JSKEY__", js_key or "JS_KEY_HERE")
             .replace("__DATA__", json.dumps(data, ensure_ascii=False))
             .replace("__BANDS__", json.dumps(bands, ensure_ascii=False)))
