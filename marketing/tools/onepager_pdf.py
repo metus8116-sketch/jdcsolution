@@ -71,32 +71,37 @@ for t in [
 ]:
     S.append(P(t, size=9, lead=11.5, space=1))
 
-S.append(heading("③ 이렇게 말하세요 — 컨택 스크립트 (광고 아님, 인사 톤)"))
-for t in [
- "• <b>마을회관/이장:</b> <i>\"안녕하세요, 죽전에스치과인데요. 어르신들 대상으로 무료 구강검진 한 번 열어드리고 싶어 인사드리러 왔어요. 어느 분께 말씀드리면 될까요?\"</i>",
- "• <b>단지 총무:</b> <i>\"옆 동네 치과인데, 입주민분들께 무료 검진 데이 한 번 해드리고 싶어요. 단톡방이나 게시판 안내가 가능할까요?\"</i>",
- "• <b>상가/약국:</b> <i>\"명함 몇 장 두고 가도 될까요? 서로 손님 소개해요.\"</i> → 끝에 <b>명함 전달 + 연락처 받기.</b> 거절해도 웃으며 감사.",
-]:
-    S.append(P(t, size=8.9, lead=11.3, space=1, color=DGREEN))
+# ③ EMPHASIZED — 특별 대우 연출 장치 (핵심 무기)
+titlestrip = Table([[Paragraph("★ ③ 우리의 핵심 무기 — 합법적으로 '특별 대우'를 연출하는 장치",
+    ParagraphStyle("st2", fontName=F, fontSize=11, leading=14, textColor=colors.white))]], colWidths=[doc.width])
+titlestrip.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),GREEN),
+    ("LEFTPADDING",(0,0),(-1,-1),6),("RIGHTPADDING",(0,0),(-1,-1),6),
+    ("TOPPADDING",(0,0),(-1,-1),3),("BOTTOMPADDING",(0,0),(-1,-1),3)]))
+# rebuild star body without its own title (title is the strip)
+star_body = [
+ P("<i>가격 할인이 아니라 <b>편의·관계</b>로 '동네 사람이라 특별 대우 받는다'는 느낌을 준다. (할인·금품 아님 → 완전히 합법 + 더 강력)</i>", 8.6, 11, color=colors.HexColor("#063a1a"), space=3),
+ P("● <b>네이밍:</b> <b>\"오산리 이웃 채널 — 죽전에스치과 동네 주치의\"</b> (소속감).", 9, 11.6, space=2),
+ P("● <b>우선·전용 예약 동선:</b> 오산리 주민에겐 카톡으로 <b>우선 예약·빠른 확인</b> (편의 제공, 가격 아님).", 9, 11.6, space=2),
+ P("● <b>동네 전용 정보:</b> 마을·단지 구강건강 안내, <b>검진 데이 선(先) 안내.</b>", 9, 11.6, space=2),
+ P("● <b>정기검진 챙김:</b> <i>\"이웃님, 6개월 검진 시기예요\"</i> 리콜 → <b>\"나를 기억하는 동네 치과\".</b>", 9, 11.6, space=2),
+ P("● <b>호칭·톤:</b> 번호가 아니라 <b>\"이웃님 / ○○동 가족\"</b>으로.", 9, 11.6, space=3),
+ P("→ 환자는 <b>'동네 사람이라 특별 대우 받는다'</b>고 느끼지만, 법적으로는 <b>할인·금품이 아닌 편의·관계 제공</b>이라 안전하다.", 9, 11.8, color=DGREEN, space=1),
+]
+bodyb = Table([[star_body]], colWidths=[doc.width])
+bodyb.setStyle(TableStyle([
+    ("BACKGROUND",(0,0),(-1,-1),colors.HexColor("#e7f7ee")),
+    ("BOX",(0,0),(-1,-1),1.6,GREEN),
+    ("LEFTPADDING",(0,0),(-1,-1),6),("RIGHTPADDING",(0,0),(-1,-1),6),
+    ("TOPPADDING",(0,0),(-1,-1),4),("BOTTOMPADDING",(0,0),(-1,-1),5)]))
+S.append(Spacer(1,3)); S.append(titlestrip); S.append(bodyb)
 
-# Two-column ④ ⑤
-left = [Paragraph("④ 절대 하지 말 것 (의료법)", ParagraphStyle("c",fontName=F,fontSize=9.6,textColor=DGREEN,leading=12,spaceAfter=2)),
-        P("<font color='#b00020'><b>×</b></font> '주민 할인 / 스케일링 무료 / 본인부담 면제' 등 <b>가격 혜택 약속</b> (= 환자 유인, 제27조).", 8.4, 10.5, space=2),
-        P("<font color='#b00020'><b>×</b></font> 증상 듣고 <b>'임플란트 하셔야 해요' 식 진단·단정.</b>", 8.4, 10.5, space=2),
-        P("<font color='#0a7d2c'><b>○</b></font> 줄 수 있는 건 <b>무료 검진(봉사)·정보·우선 예약 편의·소액 기념품(칫솔/치약)</b>뿐.", 8.4, 10.5, space=1)]
-right = [Paragraph("⑤ '특별 대우'는 가격 말고 관계로", ParagraphStyle("c",fontName=F,fontSize=9.6,textColor=DGREEN,leading=12,spaceAfter=2)),
-        P("우리 무기 = <b>\"오산리 이웃 채널 — 동네 주치의\".</b> 가격을 깎는 게 아니라 <b>카톡으로 검진 시기 먼저 챙기고, 우선 예약 도와주는</b> 동네 치과. (합법 + 더 강력)", 8.4, 10.8)]
-tw = Table([[left, right]], colWidths=[doc.width*0.5-2, doc.width*0.5-2])
-tw.setStyle(TableStyle([("VALIGN",(0,0),(-1,-1),"TOP"),
-        ("BACKGROUND",(0,0),(0,0),colors.HexColor("#fdeef0")),
-        ("BACKGROUND",(1,0),(1,0),colors.HexColor("#eef6f0")),
-        ("BOX",(0,0),(0,0),0.6,colors.HexColor("#e3b0b8")),
-        ("BOX",(1,0),(1,0),0.6,colors.HexColor("#b7dcc4")),
-        ("LEFTPADDING",(0,0),(-1,-1),5),("RIGHTPADDING",(0,0),(-1,-1),5),
-        ("TOPPADDING",(0,0),(-1,-1),3),("BOTTOMPADDING",(0,0),(-1,-1),3)]))
-S.append(Spacer(1,3)); S.append(tw)
+# ④ 절대 하지 말 것 (full width)
+S.append(heading("④ 절대 하지 말 것 (의료법 — 어기면 처분·과태료)"))
+S.append(P("<font color='#b00020'><b>×</b></font> '주민 할인 / 스케일링 무료 / 본인부담 면제' 등 <b>가격 혜택 약속</b> (= 환자 유인, 의료법 제27조).", 9, 11.5, space=2))
+S.append(P("<font color='#b00020'><b>×</b></font> 증상 듣고 <b>'그건 임플란트 하셔야 해요' 식 진단·치료 단정.</b>", 9, 11.5, space=2))
+S.append(P("<font color='#0a7d2c'><b>○</b></font> 줄 수 있는 건 <b>무료 검진(봉사)·정보·우선 예약 편의·소액 기념품(칫솔/치약)</b>뿐.", 9, 11.5, space=1))
 
-S.append(heading("⑥ 돌아와서 제출 — 보고 양식"))
+S.append(heading("⑤ 돌아와서 제출 — 보고 양식"))
 rows = ["마을회관 위치·운영시간","이장/부녀회장/노인회장 (이름·연락처)",
         "타운하우스 단지명·세대수·총무·단톡방","제휴 후보(약국·소아과·상가 등)",
         "현수막 위치 후보 / 경쟁 치과"]
